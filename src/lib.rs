@@ -29,6 +29,8 @@ pub mod artifact;
 pub mod crypto_adapter;
 pub mod index;
 pub mod provenance;
+#[cfg(feature = "spectral")]
+pub mod spectral;
 pub use artifact::{Artifact, ArtifactError};
 #[cfg(feature = "crypto")]
 pub use crypto_adapter::{
@@ -36,6 +38,10 @@ pub use crypto_adapter::{
 };
 pub use index::NodeIndex;
 pub use provenance::{Provenance, VerifierRegistry, VerifyOutcome};
+#[cfg(feature = "spectral")]
+pub use spectral::{
+    algebraic_connectivity, fiedler_vector, spectral_embedding, SpectralEmbedding, SpectralError,
+};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

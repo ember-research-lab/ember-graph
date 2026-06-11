@@ -13,7 +13,12 @@ unsafe_code = "forbid"
 # (Ed25519 today, ML-DSA/hybrid additive). OFF by default — the engine core stays zero-dependency; a
 # consumer (the SMB platform) opts in. See design/trust-model.md.
 crypto = ["dep:ember-crypto"]
+# Spectral analysis layer — normalized-Laplacian eigendecomposition backed by `faer`. Dense only;
+# suitable for modest graphs (≲ a few thousand nodes). OFF by default — core stays zero-dep.
+spectral = ["dep:faer"]
 
 [dependencies]
 # Optional, behind the `crypto` feature only — the core remains zero-dep.
 ember-crypto = { git = "https://github.com/ember-research-lab/ember-crypto", tag = "v0.1.0", optional = true }
+# Optional, behind the `spectral` feature only — the core remains zero-dep.
+faer = { version = "0.24", optional = true }
