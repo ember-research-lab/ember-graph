@@ -24,6 +24,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod index;
+pub use index::NodeIndex;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A node id — **deterministic and content-derived**, so the same entity from two sources collides
