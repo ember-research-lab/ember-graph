@@ -100,6 +100,37 @@ impl Confidence {
             Confidence::Ambiguous => 0.2,
         }
     }
+
+    /// The coarse **trust level** a confidence bucket maps to — the *total order* the propagation
+    /// primitive ([`Graph::propagate`]) meets over (trust/freshness decay). Versioned
+    /// ([`TRUST_MAP_VERSION`]) so a change to the mapping is a visible, auditable bump rather than a
+    /// silent re-weighting.
+    pub fn trust(self) -> Trust {
+        match self {
+            Confidence::Extracted => Trust::High,
+            Confidence::Inferred(InferredTier::Strong | InferredTier::Clear) => Trust::Medium,
+            Confidence::Inferred(
+                InferredTier::Reasonable | InferredTier::Weak | InferredTier::Tenuous,
+            ) => Trust::Low,
+            Confidence::Ambiguous => Trust::Untrusted,
+        }
+    }
+}
+
+/// Version of the [`Confidence::trust`] bucket→trust mapping. Bump on any change to that mapping.
+pub const TRUST_MAP_VERSION: u32 = 1;
+
+/// A coarse, **totally ordered** trust level (the order the propagation primitive meets over).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Trust {
+    /// Source unclear — don't reason from it without corroboration.
+    Untrusted,
+    /// A weak inference.
+    Low,
+    /// A solid inference.
+    Medium,
+    /// Read from authoritative/structured data.
+    High,
 }
 
 /// A graph node — an entity (a customer, a product, a document, a concept).
@@ -261,6 +292,56 @@ impl Graph {
             }
         }
         None
+    }
+
+    /// **Attribute propagation** (v0.2 item 3) — a pure, generic dataflow primitive. Each node starts
+    /// at `seed`; a value flows **along each edge** (source → target, edges allowed by `edge_filter`)
+    /// and is combined into the target with the caller's `meet`. Iterates to a fixpoint.
+    ///
+    /// Consumer-agnostic by design — the core does not know what's propagating:
+    /// - **manuscript/Lean**: orient edges dependency → dependent and `meet` = "the weaker verdict
+    ///   wins" (`min` over CLOSED > CONDITIONAL > … > OPEN). Downstream of a CONDITIONAL node becomes
+    ///   at-best-CONDITIONAL — exactly the audit rule.
+    /// - **SMB**: `meet` = trust/freshness decay over [`Trust`] (a low-trust source caps its dependents).
+    ///
+    /// `meet(arriving, current) -> A` must be a meet (idempotent, commutative, associative) for a
+    /// stable fixpoint; iterations are bounded by node count as a defensive backstop regardless.
+    pub fn propagate<A, S, M, F>(&self, seed: S, meet: M, edge_filter: F) -> HashMap<NodeId, A>
+    where
+        A: Clone + PartialEq,
+        S: Fn(&NodeId) -> A,
+        M: Fn(&A, &A) -> A,
+        F: Fn(&Edge) -> bool,
+    {
+        let mut val: HashMap<NodeId, A> =
+            self.nodes.keys().map(|id| (id.clone(), seed(id))).collect();
+        let max_iters = self.nodes.len() + 1;
+        for _ in 0..max_iters {
+            let mut changed = false;
+            // Source values are read from a snapshot (stable within the pass); the target value
+            // **accumulates** within the pass, so a node's several in-edges fold via `meet` rather
+            // than the last edge clobbering the rest.
+            let prev = val.clone();
+            for edges in self.out.values() {
+                for e in edges {
+                    if !edge_filter(e) {
+                        continue;
+                    }
+                    let (Some(src), Some(cur)) = (prev.get(&e.source), val.get(&e.target)) else {
+                        continue;
+                    };
+                    let next = meet(src, cur);
+                    if &next != cur {
+                        val.insert(e.target.clone(), next);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        val
     }
 
     /// **The query primitive.** Answer `question` by (1) lexically scoring nodes by label overlap
@@ -513,5 +594,48 @@ mod tests {
         g.add_node(n("a", "Acme", "contact"));
         assert!(g.query("zzzz nonexistent", 2, 500).is_empty());
         assert!(g.query("", 2, 500).is_empty());
+    }
+
+    #[test]
+    fn propagate_verdict_over_a_diamond() {
+        // The manuscript/Lean case: downstream of a CONDITIONAL node is at-best CONDITIONAL.
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+        enum V {
+            Open,
+            Conditional,
+            Closed,
+        }
+        let mut g = Graph::new();
+        for id in ["top", "left", "right", "bottom"] {
+            g.add_node(n(id, id, "thm"));
+        }
+        // edges oriented dependency → dependent.
+        g.add_edge(e("top", "left", "dep", Confidence::Extracted));
+        g.add_edge(e("top", "right", "dep", Confidence::Extracted));
+        g.add_edge(e("left", "bottom", "dep", Confidence::Extracted));
+        g.add_edge(e("right", "bottom", "dep", Confidence::Extracted));
+        let seed = |id: &NodeId| match id.0.as_str() {
+            "left" => V::Conditional, // one dependency is only conditionally closed
+            _ => V::Closed,
+        };
+        // meet = the weaker verdict wins.
+        let meet = |arriving: &V, current: &V| (*arriving).min(*current);
+        let out = g.propagate(seed, meet, |_| true);
+        assert_eq!(out[&NodeId("right".into())], V::Closed); // unaffected branch
+        assert_eq!(out[&NodeId("left".into())], V::Conditional);
+        // bottom transitively depends on the CONDITIONAL node → at best CONDITIONAL.
+        assert_eq!(out[&NodeId("bottom".into())], V::Conditional);
+        let _ = V::Open; // (the bottom of the order; present for completeness)
+    }
+
+    #[test]
+    fn trust_mapping_is_ordered_and_versioned() {
+        assert!(Confidence::Extracted.trust() > Confidence::Inferred(InferredTier::Clear).trust());
+        assert!(
+            Confidence::Inferred(InferredTier::Clear).trust()
+                > Confidence::Inferred(InferredTier::Weak).trust()
+        );
+        assert!(Confidence::Inferred(InferredTier::Weak).trust() > Confidence::Ambiguous.trust());
+        assert_eq!(super::TRUST_MAP_VERSION, 1);
     }
 }
