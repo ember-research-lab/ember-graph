@@ -1,6 +1,6 @@
 //! crypto_adapter — real [`Signer`]/[`Verifier`] for the provenance envelope, backed by `ember-crypto`.
 //!
-//! The envelope schema ([`Provenance`]) and the verification *interface* live in [`provenance`]; this
+//! The envelope schema ([`Provenance`]) and the verification *interface* live in [`crate::provenance`]; this
 //! module is the feature-gated bridge that makes them **cryptographically real** using the org's
 //! shared crypto surface (`ember-crypto`: Ed25519 today, ML-DSA-65 / hybrid additive). It implements
 //! the trust model in `design/trust-model.md`:
@@ -11,7 +11,7 @@
 //!   plus a namespace-scope check. The platform root public key is the offline trust anchor.
 //!
 //! Verification stays **offline**: it needs the envelope, the subject id, and the local trust store —
-//! no network. Adding ML-DSA / hybrid is additive (the [`SchemeRegistry`] dispatches on the named
+//! no network. Adding ML-DSA / hybrid is additive (the `SchemeRegistry` dispatches on the named
 //! algorithm); old envelopes keep verifying.
 
 use std::collections::HashMap;

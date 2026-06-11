@@ -29,7 +29,9 @@ use std::fmt;
 
 use crate::index::NodeIndexSnapshot;
 use crate::provenance::Attestation;
-use crate::{Confidence, Edge, Graph, InferredTier, Node, NodeId, NodeIndex, Provenance};
+use crate::{
+    Confidence, Edge, Graph, InferredTier, Node, NodeId, NodeIndex, Provenance, ProvenanceIndex,
+};
 
 /// The 8-byte container magic.
 const MAGIC: &[u8; 8] = b"EMGRAPH\0";
@@ -70,6 +72,12 @@ impl Artifact {
     /// Attach a provenance envelope for `subject_id` in place.
     pub fn attach_provenance(&mut self, subject_id: impl Into<String>, envelope: Provenance) {
         self.provenance.push((subject_id.into(), envelope));
+    }
+
+    /// Build the **O(1)** [`ProvenanceIndex`] from this artifact's side-table — the runtime structure
+    /// a verifier queries (the on-disk form is the canonical sorted `Vec`; this is its indexed view).
+    pub fn provenance_index(&self) -> ProvenanceIndex {
+        ProvenanceIndex::from_pairs(self.provenance.iter().cloned())
     }
 
     /// Serialize to the flat, section-framed, deterministic byte container (see the module docs).

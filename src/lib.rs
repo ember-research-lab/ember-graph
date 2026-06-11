@@ -21,6 +21,17 @@
 //! **Extraction** (turning documents into nodes/edges via an LLM) is the *consumer's* job — it owns
 //! the model and the prompt; ember-graph is the schema it targets + the store + the query. The
 //! structured side (records → nodes/edges) is a pure projection the consumer feeds in directly.
+//!
+//! ## v0.2 — the verification substrate
+//!
+//! The graph's deepest role is **verification**, not retrieval: an orchestrator reasons from cheap
+//! *summaries* that drop nuance it can't see, so it verifies a claim by pulling the **signed fact
+//! behind it** in O(1) ([`Graph::fact_view`] + [`ProvenanceIndex`]) and checking against that ground
+//! truth — not the summary it came from. Built on: a stable u64 tensor-address index ([`NodeIndex`]),
+//! a crypto-agile, offline-verifiable [`Provenance`] envelope (real signing via the `crypto`
+//! feature's `crypto_adapter`, implementing `design/trust-model.md`), a self-contained [`Artifact`]
+//! format, and a `spectral`-feature Laplacian layer. The **core stays zero-dependency**; `crypto`
+//! and `spectral` are opt-in.
 
 #![forbid(unsafe_code)]
 
@@ -37,7 +48,7 @@ pub use crypto_adapter::{
     verifier_registry, AuthorizedOutcome, EmberSigner, EmberVerifier, TrustStore,
 };
 pub use index::NodeIndex;
-pub use provenance::{Provenance, VerifierRegistry, VerifyOutcome};
+pub use provenance::{Provenance, ProvenanceIndex, VerifierRegistry, VerifyOutcome};
 #[cfg(feature = "spectral")]
 pub use spectral::{
     algebraic_connectivity, fiedler_vector, spectral_embedding, SpectralEmbedding, SpectralError,
@@ -172,6 +183,18 @@ pub struct Edge {
     pub confidence: Confidence,
 }
 
+/// The signed fact behind a subject, retrieved in O(1) by [`Graph::fact_view`] — the unit a verifier
+/// checks a summary claim against. Borrows from the graph + the [`ProvenanceIndex`].
+pub struct FactView<'a> {
+    /// The subject node.
+    pub node: &'a Node,
+    /// Its outgoing edges (the asserted facts about the subject), with their confidence buckets.
+    pub edges: &'a [Edge],
+    /// The provenance envelopes attesting the node subject (≥0). Edge-level provenance is keyed by the
+    /// edge's own subject id — fetch via [`ProvenanceIndex::for_subject`].
+    pub provenance: &'a [Provenance],
+}
+
 /// The knowledge graph: nodes + directed adjacency. Incremental and **never silently shrinks** (a
 /// merge only adds / upgrades). Zero-dep; an in-memory adjacency structure.
 #[derive(Default)]
@@ -255,6 +278,26 @@ impl Graph {
     /// Outgoing edges from a node.
     pub fn neighbors(&self, id: &NodeId) -> &[Edge] {
         self.out.get(id).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// **Retrieve the signed fact behind a claim, in O(1)** — the graph-as-verification-substrate
+    /// primitive. Given a subject node and a [`ProvenanceIndex`], bundle the node, its outgoing edges
+    /// (the asserted facts), and the provenance envelopes attesting that node — every part an O(1)
+    /// lookup. A verifier checks a summary's claim against this *signed ground truth* rather than
+    /// against the summary it came from (so it can't inherit the summarizer's blind spot). `None` if
+    /// the node is absent. Edge-level provenance is keyed by the edge's own subject id — fetch it with
+    /// [`ProvenanceIndex::for_subject`].
+    pub fn fact_view<'a>(
+        &'a self,
+        id: &NodeId,
+        provenance: &'a ProvenanceIndex,
+    ) -> Option<FactView<'a>> {
+        let node = self.nodes.get(id)?;
+        Some(FactView {
+            node,
+            edges: self.neighbors(id),
+            provenance: provenance.for_subject(&id.0),
+        })
     }
 
     /// Undirected degree of a node (in + out) — used for hub-avoidance.
@@ -653,5 +696,32 @@ mod tests {
         );
         assert!(Confidence::Inferred(InferredTier::Weak).trust() > Confidence::Ambiguous.trust());
         assert_eq!(super::TRUST_MAP_VERSION, 1);
+    }
+
+    #[test]
+    fn fact_view_bundles_node_edges_and_provenance_in_one_call() {
+        let mut g = Graph::new();
+        g.add_node(n("t::john", "John Doe", "contact"));
+        g.add_edge(e("t::john", "t::acme", "owns", Confidence::Extracted));
+
+        let mut prov = ProvenanceIndex::new();
+        prov.insert(
+            "t::john",
+            Provenance {
+                asserting_agent: "t:agent".into(),
+                basis: Confidence::Extracted,
+                parent_hash: vec![1, 2, 3],
+                algorithm: "mock".into(),
+                attestations: vec![],
+            },
+        );
+
+        let view = g.fact_view(&NodeId("t::john".into()), &prov).unwrap();
+        assert_eq!(view.node.label, "John Doe");
+        assert_eq!(view.edges.len(), 1);
+        assert_eq!(view.edges[0].relation, "owns");
+        assert_eq!(view.provenance.len(), 1);
+        // Absent subject → None.
+        assert!(g.fact_view(&NodeId("t::missing".into()), &prov).is_none());
     }
 }

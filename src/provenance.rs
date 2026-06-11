@@ -24,6 +24,8 @@
 //! **extensible** (`attestations: Vec<Attestation>`) rather than assuming a fixed shape — the final
 //! schema is gated on that decision.
 
+use std::collections::HashMap;
+
 use crate::Confidence;
 
 /// The basis on which an assertion was made — mirrors [`Confidence`], captured in the signed payload
@@ -165,6 +167,60 @@ impl VerifierRegistry {
     }
 }
 
+/// **O(1) lookup of provenance by subject id** — the graph-as-verification-substrate primitive.
+///
+/// An orchestrator works from *summaries* (cheap, but they drop nuance it can't see). To verify a
+/// summary's claim, it pulls the **signed fact behind the claim** from the graph and checks against
+/// it — not against the summary it came from. That retrieval must be cheap: the artifact's on-disk
+/// provenance is a sorted `Vec` (canonical, content-addressable), but at runtime a verifier needs
+/// **O(1)** access by subject. This index provides it. A subject may carry more than one envelope
+/// (e.g. asserted by several agents), so each maps to a slice.
+#[derive(Clone, Debug, Default)]
+pub struct ProvenanceIndex {
+    by_subject: HashMap<String, Vec<Provenance>>,
+}
+
+impl ProvenanceIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Index a `(subject_id, envelope)` pair.
+    pub fn insert(&mut self, subject: impl Into<String>, envelope: Provenance) {
+        self.by_subject
+            .entry(subject.into())
+            .or_default()
+            .push(envelope);
+    }
+
+    /// Build the index from `(subject, envelope)` pairs (e.g. an [`crate::Artifact`]'s side-table).
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, Provenance)>) -> Self {
+        let mut ix = Self::new();
+        for (subject, env) in pairs {
+            ix.insert(subject, env);
+        }
+        ix
+    }
+
+    /// All envelopes attesting `subject`, in **O(1)** — an empty slice if none. This is the
+    /// "fetch the signed fact behind this claim" call; works for node *and* edge subject ids.
+    pub fn for_subject(&self, subject: &str) -> &[Provenance] {
+        self.by_subject
+            .get(subject)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Total envelopes indexed (across all subjects).
+    pub fn len(&self) -> usize {
+        self.by_subject.values().map(|v| v.len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_subject.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +328,28 @@ mod tests {
         assert!(reg.for_algorithm("mock-v1").is_some());
         assert!(reg.for_algorithm("future-pqc").is_some());
         assert!(reg.for_algorithm("nope").is_none());
+    }
+
+    #[test]
+    fn provenance_index_retrieves_and_verifies_in_one_hop() {
+        // The verification-substrate flow: index envelopes, retrieve the signed fact behind a
+        // subject by key, then verify it — no scan of the corpus.
+        let signer = MockAlgo;
+        let reg = VerifierRegistry::new().with(Box::new(MockAlgo));
+        let mut ix = ProvenanceIndex::new();
+        ix.insert("edge:john->acme", envelope(&signer, "edge:john->acme"));
+        ix.insert(
+            "edge:acme->invoice42",
+            envelope(&signer, "edge:acme->invoice42"),
+        );
+
+        // Unknown subject → empty (not a panic, not a scan).
+        assert!(ix.for_subject("edge:nope").is_empty());
+
+        // Known subject → the signed envelope, retrieved by key, which verifies against ground truth.
+        let got = ix.for_subject("edge:john->acme");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].verify("edge:john->acme", &reg), VerifyOutcome::Valid);
+        assert_eq!(ix.len(), 2);
     }
 }
