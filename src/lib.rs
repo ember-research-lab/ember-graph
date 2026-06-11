@@ -25,7 +25,9 @@
 #![forbid(unsafe_code)]
 
 pub mod index;
+pub mod provenance;
 pub use index::NodeIndex;
+pub use provenance::{Provenance, VerifierRegistry, VerifyOutcome};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
