@@ -24,8 +24,14 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "crypto")]
+pub mod crypto_adapter;
 pub mod index;
 pub mod provenance;
+#[cfg(feature = "crypto")]
+pub use crypto_adapter::{
+    verifier_registry, AuthorizedOutcome, EmberSigner, EmberVerifier, TrustStore,
+};
 pub use index::NodeIndex;
 pub use provenance::{Provenance, VerifierRegistry, VerifyOutcome};
 
