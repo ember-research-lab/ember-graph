@@ -119,6 +119,42 @@ impl NodeIndex {
     pub fn capacity(&self) -> u64 {
         self.next
     }
+
+    /// Snapshot the raw internal state for serialization (item 4). The fields are private and the
+    /// `artifact` module is a sibling that can't reach them, so this `pub(crate)` accessor is the
+    /// only sanctioned door — it clones the five fields verbatim so a round-trip is byte-faithful.
+    pub(crate) fn snapshot(&self) -> NodeIndexSnapshot {
+        NodeIndexSnapshot {
+            next: self.next,
+            by_id: self.by_id.clone(),
+            by_u64: self.by_u64.clone(),
+            tombstoned: self.tombstoned.clone(),
+            merged_into: self.merged_into.clone(),
+        }
+    }
+
+    /// Reconstruct a `NodeIndex` from a [`NodeIndexSnapshot`] (item 4 deserialization). Inverse of
+    /// [`snapshot`](NodeIndex::snapshot): restores the five fields exactly, so `capacity`, the live
+    /// maps, the tombstones, and the merge lineage all come back identical.
+    pub(crate) fn from_snapshot(s: NodeIndexSnapshot) -> Self {
+        NodeIndex {
+            next: s.next,
+            by_id: s.by_id,
+            by_u64: s.by_u64,
+            tombstoned: s.tombstoned,
+            merged_into: s.merged_into,
+        }
+    }
+}
+
+/// A verbatim copy of [`NodeIndex`]'s five private fields, for the serializer in the `artifact`
+/// module (a sibling that can't otherwise reach them). Crate-internal by design.
+pub(crate) struct NodeIndexSnapshot {
+    pub(crate) next: u64,
+    pub(crate) by_id: HashMap<NodeId, u64>,
+    pub(crate) by_u64: HashMap<u64, NodeId>,
+    pub(crate) tombstoned: Vec<u64>,
+    pub(crate) merged_into: HashMap<u64, u64>,
 }
 
 #[cfg(test)]

@@ -24,10 +24,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod artifact;
 #[cfg(feature = "crypto")]
 pub mod crypto_adapter;
 pub mod index;
 pub mod provenance;
+pub use artifact::{Artifact, ArtifactError};
 #[cfg(feature = "crypto")]
 pub use crypto_adapter::{
     verifier_registry, AuthorizedOutcome, EmberSigner, EmberVerifier, TrustStore,
@@ -142,7 +144,7 @@ pub enum Trust {
 }
 
 /// A graph node — an entity (a customer, a product, a document, a concept).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
     /// Human-facing label (what the query matches against), e.g. "Acme LLC".
@@ -155,7 +157,7 @@ pub struct Node {
 
 /// A directed, typed, confidence-weighted edge. By convention **source is the actor, target the
 /// acted-upon** (so direction is stable across extractors).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edge {
     pub source: NodeId,
     pub target: NodeId,
