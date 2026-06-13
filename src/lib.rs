@@ -287,6 +287,13 @@ impl Graph {
         self.nodes.len()
     }
 
+    /// Iterate every node id in the graph. Used by a consumer that needs a whole-graph view (e.g.
+    /// a bounded export for rendering a relationship panel); pair with [`node`](Graph::node) /
+    /// [`neighbors`](Graph::neighbors) to materialize nodes + edges.
+    pub fn node_ids(&self) -> impl Iterator<Item = &NodeId> {
+        self.nodes.keys()
+    }
+
     /// Outgoing edges from a node.
     pub fn neighbors(&self, id: &NodeId) -> &[Edge] {
         self.out.get(id).map(|v| v.as_slice()).unwrap_or(&[])
