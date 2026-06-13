@@ -267,6 +267,18 @@ impl Graph {
         }
     }
 
+    /// **Erasure** — remove a node and every edge incident to it (both its outgoing edges and any
+    /// edge pointing *at* it). A node's `label` can be personal data, so a consumer that must honor a
+    /// right-to-erasure deletes the subject's node here. Idempotent: forgetting an absent id is a
+    /// no-op. (The graph is otherwise grow-only — this is the one deliberate removal, for erasure.)
+    pub fn forget(&mut self, id: &NodeId) {
+        self.nodes.remove(id);
+        self.out.remove(id);
+        for edges in self.out.values_mut() {
+            edges.retain(|e| &e.target != id);
+        }
+    }
+
     pub fn node(&self, id: &NodeId) -> Option<&Node> {
         self.nodes.get(id)
     }
@@ -653,6 +665,42 @@ mod tests {
         g.add_node(n("a", "Acme", "contact"));
         assert!(g.query("zzzz nonexistent", 2, 500).is_empty());
         assert!(g.query("", 2, 500).is_empty());
+    }
+
+    #[test]
+    fn forget_removes_a_node_and_all_incident_edges() {
+        let mut g = Graph::new();
+        g.add_node(n("doc", "Return policy", "document"));
+        g.add_node(n("jane", "Jane Doe", "contact")); // the PII-bearing node (label = a name)
+        g.add_node(n("order", "Order 1", "order"));
+        g.add_edge(e(
+            "doc",
+            "jane",
+            "mentions",
+            Confidence::Inferred(InferredTier::Clear),
+        ));
+        g.add_edge(e("jane", "order", "placed", Confidence::Extracted));
+
+        // erase the subject
+        g.forget(&NodeId("jane".into()));
+
+        assert!(
+            g.node(&NodeId("jane".into())).is_none(),
+            "the node (and its label) is gone"
+        );
+        assert!(
+            g.neighbors(&NodeId("jane".into())).is_empty(),
+            "its outgoing edges are gone"
+        );
+        assert!(
+            g.neighbors(&NodeId("doc".into())).is_empty(),
+            "an edge pointing AT the forgotten node is gone too"
+        );
+        assert!(
+            g.node(&NodeId("doc".into())).is_some(),
+            "unrelated nodes remain"
+        );
+        g.forget(&NodeId("jane".into())); // idempotent
     }
 
     #[test]
