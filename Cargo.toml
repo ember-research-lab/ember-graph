@@ -1,9 +1,10 @@
 [package]
 name = "ember-graph"
 description = "A reusable, zero-dependency knowledge-graph engine for the Ember stack. A clean-room reimplementation of the Graphify patterns (typed node/edge model + discrete EXTRACTED/INFERRED/AMBIGUOUS confidence rubric + a token-budgeted BFS query primitive) as a multi-consumer Ember capability — the SMB platform's business graph, the research repos, agent context. No vector DB, no third-party deps."
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ember-research-lab/ember-graph"
 
 [lints.rust]
 unsafe_code = "forbid"
