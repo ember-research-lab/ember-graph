@@ -20,6 +20,6 @@ spectral = ["dep:faer"]
 
 [dependencies]
 # Optional, behind the `crypto` feature only — the core remains zero-dep.
-ember-crypto = { git = "https://github.com/ember-research-lab/ember-crypto", tag = "v0.1.0", optional = true }
+ember-crypto = { git = "https://github.com/ember-research-lab/ember-crypto", tag = "v0.1.1", optional = true }
 # Optional, behind the `spectral` feature only — the core remains zero-dep.
 faer = { version = "0.24", optional = true }
